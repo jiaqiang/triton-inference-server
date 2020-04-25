@@ -39,46 +39,6 @@ class ServerStatusManager;
 class OpaqueTraceManager;
 class Trace;
 
-// Updates a server stat with duration measured by a C++ scope.
-class ServerStatTimerScoped {
- public:
-  enum Kind {
-    // Stat for status request. Duration from request to response.
-    STATUS,
-    // Stat for health request. Duration from request to response.
-    HEALTH,
-    // Stat for model control request. Duration from request to
-    // response.
-    MODEL_CONTROL,
-    // Stat for repository request. Duration from request to response.
-    REPOSITORY
-  };
-
-  // Start server timer for a given status 'kind'.
-  ServerStatTimerScoped(
-      const std::shared_ptr<ServerStatusManager>& status_manager, Kind kind)
-      : status_manager_(status_manager), kind_(kind), enabled_(true)
-  {
-    clock_gettime(CLOCK_MONOTONIC, &start_);
-  }
-
-  // Stop the timer and record the duration, unless reporting has been
-  // disabled.
-  ~ServerStatTimerScoped();
-
-  // Enable/Disable reporting for this timer. By default reporting is
-  // enabled and so the server status is updated when this object is
-  // destructed. Reporting may be enabled/disabled multiple times
-  // while the timer is running without affecting the duration.
-  void SetEnabled(bool enabled) { enabled_ = enabled; }
-
- private:
-  std::shared_ptr<ServerStatusManager> status_manager_;
-  const Kind kind_;
-  bool enabled_;
-  struct timespec start_;
-};
-
 // Stats collector for an inference request. If TRTIS_ENABLE_STATS is not
 // defined, it will only records timestamps that may be used by other objects
 // along the inference pipeline (i.e. scheduler)
@@ -230,7 +190,7 @@ class ModelInferStats {
 class ServerStatusManager {
  public:
   // Create a manager for server status
-  explicit ServerStatusManager(const std::string& server_version);
+  explicit ServerStatusManager() = default;
 
   // Initialize status for a model.
   Status InitForModel(
@@ -246,37 +206,34 @@ class ServerStatusManager {
       const ModelReadyStateReason& state_reason);
 
   // Get the entire server status, including status for all models.
-  Status Get(
-      ServerStatus* server_status, const std::string& server_id,
-      ServerReadyState server_ready_state, uint64_t server_uptime_ns) const;
+  Status Get(ServerStatus* server_status) const;
 
   // Get the server status and the status for a single model.
-  Status Get(
-      ServerStatus* server_status, const std::string& server_id,
-      ServerReadyState server_ready_state, uint64_t server_uptime_ns,
-      const std::string& model_name) const;
-
-  // Add a duration to the Server Stat specified by 'kind'.
-  void UpdateServerStat(uint64_t duration, ServerStatTimerScoped::Kind kind);
+  Status Get(ServerStatus* server_status, const std::string& model_name) const;
 
   // Add durations to Infer stats for a failed inference request.
   void UpdateFailedInferStats(
       const std::string& model_name, const int64_t model_version,
-      size_t batch_size, uint64_t last_timestamp_ms,
-      uint64_t request_duration_ns);
+      uint64_t last_timestamp_ms, uint64_t request_duration_ns);
 
-  // [V1] Add durations to Infer stats for a successful inference request.
+  // FIXME the infer stats is updated as combination of the below two function
+  // calls. For first implementation, the functions will be called in different
+  // locations: the prior in InferenceRequest::Release() and the latter in
+  // BackendContext::Run(), so the stats may be out of sync in between. Should
+  // be able to fix it by grouping the two function calls in "atomic" fashion.
+  //
+  // Add durations to infer stats for a successful inference request.
   void UpdateSuccessInferStats(
       const std::string& model_name, const int64_t model_version,
-      size_t batch_size, uint32_t execution_cnt, uint64_t last_timestamp_ms,
-      uint64_t request_duration_ns, uint64_t queue_duration_ns,
-      uint64_t compute_duration_ns);
+      uint64_t last_timestamp_ms, uint64_t request_duration_ns,
+      uint64_t queue_duration_ns);
 
-  // [V2] Add durations to Infer stats for a successful inference request.
-  void UpdateSuccessInferStats(
+  // Add durations to batch infer stats for a batch execution.
+  // 'success_request_count' is the number of sucess requests in the batch that
+  // have infer_stats attached.
+  void UpdateSuccessInferBatchStats(
       const std::string& model_name, const int64_t model_version,
-      uint32_t execution_cnt, uint64_t last_timestamp_ms,
-      uint64_t request_duration_ns, uint64_t queue_duration_ns,
+      size_t batch_size, size_t success_request_count,
       uint64_t compute_input_duration_ns, uint64_t compute_infer_duration_ns,
       uint64_t compute_output_duration_ns);
 

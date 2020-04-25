@@ -115,7 +115,7 @@ InferenceServer::InferenceServer()
 
   inflight_request_counter_ = 0;
 
-  status_manager_.reset(new ServerStatusManager(version_));
+  status_manager_.reset(new ServerStatusManager());
 }
 
 Status
@@ -300,8 +300,7 @@ InferenceServer::IsReady(bool* ready)
     // Strict readiness... get the model status and make sure all
     // models are ready.
     ServerStatus server_status;
-    Status status =
-        status_manager_->Get(&server_status, id_, ready_state_, UptimeNs());
+    Status status = status_manager_->Get(&server_status);
 
     *ready = status.IsOk();
     if (*ready) {
@@ -449,10 +448,9 @@ InferenceServer::GetStatus(
   // If no specific model request just return the entire status
   // object.
   if (model_name.empty()) {
-    return status_manager_->Get(server_status, id_, ready_state_, UptimeNs());
+    return status_manager_->Get(server_status);
   } else {
-    return status_manager_->Get(
-        server_status, id_, ready_state_, UptimeNs(), model_name);
+    return status_manager_->Get(server_status, model_name);
   }
 
   return Status::Success;

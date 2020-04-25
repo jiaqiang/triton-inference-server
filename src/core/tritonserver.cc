@@ -1452,11 +1452,6 @@ TRITONSERVER_ServerIsLive(TRITONSERVER_Server* server, bool* live)
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
 
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::HEALTH);
-#endif  // TRTIS_ENABLE_STATS
-
   RETURN_IF_STATUS_ERROR(lserver->IsLive(live));
   return nullptr;  // Success
 }
@@ -1465,11 +1460,6 @@ TRITONSERVER_Error*
 TRITONSERVER_ServerIsReady(TRITONSERVER_Server* server, bool* ready)
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
-
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::HEALTH);
-#endif  // TRTIS_ENABLE_STATS
 
   RETURN_IF_STATUS_ERROR(lserver->IsReady(ready));
   return nullptr;  // Success
@@ -1482,11 +1472,6 @@ TRITONSERVER_ServerModelIsReady(
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
 
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::HEALTH);
-#endif  // TRTIS_ENABLE_STATS
-
   RETURN_IF_STATUS_ERROR(
       lserver->ModelIsReady(model_name, model_version, ready));
   return nullptr;  // Success
@@ -1497,11 +1482,6 @@ TRITONSERVER_ServerMetadata(
     TRITONSERVER_Server* server, TRITONSERVER_Message** server_metadata)
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
-
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::STATUS);
-#endif  // TRTIS_ENABLE_STATS
 
   rapidjson::Document metadata;
   metadata.SetObject();
@@ -1532,11 +1512,6 @@ TRITONSERVER_ServerModelMetadata(
     const int64_t model_version, TRITONSERVER_Message** model_metadata)
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
-
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::STATUS);
-#endif  // TRTIS_ENABLE_STATS
 
   std::shared_ptr<ni::InferenceBackend> backend;
   RETURN_IF_STATUS_ERROR(
@@ -1623,11 +1598,6 @@ TRITONSERVER_ServerModelStatistics(
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
 
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::STATUS);
-#endif  // TRTIS_ENABLE_STATS
-
   auto model_name_string = std::string(model_name);
 
   ni::ServerStatus server_status;
@@ -1647,81 +1617,79 @@ TRITONSERVER_ServerModelStatistics(
   auto& allocator = metadata.GetAllocator();
   metadata.SetObject();
 
-  rapidjson::Value versions(rapidjson::kArrayType);
+  // FIXME create nested result after the changes on
+  // returning all models on empty model name is merged
+  rapidjson::Value model_version_stats(rapidjson::kArrayType);
   for (const auto& v : model_status.version_status()) {
     if ((model_version == -1) || (v.first == model_version)) {
       rapidjson::Value inference_stats(rapidjson::kObjectType);
-      const auto& ir = v.second.infer_stats().find(1);
-      if (ir == v.second.infer_stats().end()) {
-        static nvidia::inferenceserver::StatDuration zero_duration;
+      rapidjson::Value duration_stats;
+      SetDurationStats(
+          v.second.infer_stats().success(), allocator, &duration_stats);
+      inference_stats.AddMember("success", duration_stats, allocator);
+
+      SetDurationStats(
+          v.second.infer_stats().failed(), allocator, &duration_stats);
+      inference_stats.AddMember("fail", duration_stats, allocator);
+
+      SetDurationStats(
+          v.second.infer_stats().queue(), allocator, &duration_stats);
+      inference_stats.AddMember("queue", duration_stats, allocator);
+
+      SetDurationStats(
+          v.second.infer_stats().compute_input(), allocator, &duration_stats);
+      inference_stats.AddMember("compute_input", duration_stats, allocator);
+
+      SetDurationStats(
+          v.second.infer_stats().compute_infer(), allocator, &duration_stats);
+      inference_stats.AddMember("compute_infer", duration_stats, allocator);
+
+      SetDurationStats(
+          v.second.infer_stats().compute_output(), allocator, &duration_stats);
+      inference_stats.AddMember("compute_output", duration_stats, allocator);
+
+      rapidjson::Value batch_stats(rapidjson::kArrayType);
+      for (const auto& batch : v.second.infer_batch_stats()) {
+        rapidjson::Value batch_stat(rapidjson::kObjectType);
         rapidjson::Value duration_stats;
-        SetDurationStats(zero_duration, allocator, &duration_stats);
-        // Explicit use rapidjson's copy semantics to avoid calling
-        // SetDurationStats()
-        inference_stats.AddMember(
-            "success", rapidjson::Value(duration_stats, allocator), allocator);
-        inference_stats.AddMember(
-            "fail", rapidjson::Value(duration_stats, allocator), allocator);
-        ;
-        inference_stats.AddMember(
-            "queue", rapidjson::Value(duration_stats, allocator), allocator);
-        ;
-        inference_stats.AddMember(
-            "compute_input", rapidjson::Value(duration_stats, allocator),
-            allocator);
-        ;
-        inference_stats.AddMember(
-            "compute_infer", rapidjson::Value(duration_stats, allocator),
-            allocator);
-        ;
-        inference_stats.AddMember(
-            "compute_output", rapidjson::Value(duration_stats, allocator),
-            allocator);
-        ;
-      } else {
-        rapidjson::Value duration_stats;
-        SetDurationStats(ir->second.success(), allocator, &duration_stats);
-        inference_stats.AddMember("success", duration_stats, allocator);
 
-        SetDurationStats(ir->second.failed(), allocator, &duration_stats);
-        inference_stats.AddMember("fail", duration_stats, allocator);
-        ;
-
-        SetDurationStats(ir->second.queue(), allocator, &duration_stats);
-        inference_stats.AddMember("queue", duration_stats, allocator);
-        ;
+        batch_stat.AddMember(
+            "batch_size", rapidjson::Value(batch.first).Move(), allocator);
+        batch_stat.AddMember(
+            "count",
+            rapidjson::Value(batch.second.compute_infer().count()).Move(),
+            allocator);
+        SetDurationStats(
+            batch.second.compute_input(), allocator, &duration_stats);
+        batch_stat.AddMember("compute_input", duration_stats, allocator);
 
         SetDurationStats(
-            ir->second.compute_input(), allocator, &duration_stats);
-        inference_stats.AddMember("compute_input", duration_stats, allocator);
-        ;
+            batch.second.compute_infer(), allocator, &duration_stats);
+        batch_stat.AddMember("compute_infer", duration_stats, allocator);
 
         SetDurationStats(
-            ir->second.compute_infer(), allocator, &duration_stats);
-        inference_stats.AddMember("compute_infer", duration_stats, allocator);
-        ;
-
-        SetDurationStats(
-            ir->second.compute_output(), allocator, &duration_stats);
-        inference_stats.AddMember("compute_output", duration_stats, allocator);
-        ;
+            batch.second.compute_output(), allocator, &duration_stats);
+        batch_stat.AddMember("compute_output", duration_stats, allocator);
+        batch_stats.PushBack(batch_stat, allocator);
       }
-      rapidjson::Value stats(rapidjson::kObjectType);
-      stats.AddMember("inference", inference_stats, allocator);
 
-      rapidjson::Value version_stats(rapidjson::kObjectType);
+      rapidjson::Value model_stat(rapidjson::kObjectType);
       auto version_str = std::to_string(v.first);
-      version_stats.AddMember(
+      model_stat.AddMember(
+          "name", rapidjson::Value(model_name_string.c_str(), allocator).Move(),
+          allocator);
+      model_stat.AddMember(
           "version", rapidjson::Value(version_str.c_str(), allocator).Move(),
           allocator);
-      version_stats.AddMember("stats", stats, allocator);
-      versions.PushBack(version_stats, allocator);
+      model_stat.AddMember("inference_stats", inference_stats, allocator);
+      model_stat.AddMember("batch_stats", batch_stats, allocator);
+      model_version_stats.PushBack(model_stat, allocator);
       if (model_version != -1) {
         break;
       }
     }
   }
-  metadata.AddMember("version_stats", versions, allocator);
+  metadata.AddMember("model_stats", model_version_stats, allocator);
   *model_stats = reinterpret_cast<TRITONSERVER_Message*>(
       new TritonServerMessage(metadata));
   return nullptr;  // success
@@ -1733,11 +1701,6 @@ TRITONSERVER_ServerModelConfig(
     const int64_t model_version, TRITONSERVER_Message** model_config)
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
-
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::STATUS);
-#endif  // TRTIS_ENABLE_STATS
 
   std::shared_ptr<ni::InferenceBackend> backend;
   RETURN_IF_STATUS_ERROR(
@@ -1771,11 +1734,6 @@ TRITONSERVER_ServerModelIndex(
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
 
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::REPOSITORY);
-#endif  // TRTIS_ENABLE_STATS
-
   ni::ModelRepositoryIndex model_repository_index;
   RETURN_IF_STATUS_ERROR(
       lserver->GetModelRepositoryIndex(&model_repository_index));
@@ -1802,11 +1760,6 @@ TRITONSERVER_ServerLoadModel(
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
 
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::MODEL_CONTROL);
-#endif  // TRTIS_ENABLE_STATS
-
   RETURN_IF_STATUS_ERROR(lserver->LoadModel(std::string(model_name)));
 
   return nullptr;  // success
@@ -1817,11 +1770,6 @@ TRITONSERVER_ServerUnloadModel(
     TRITONSERVER_Server* server, const char* model_name)
 {
   ni::InferenceServer* lserver = reinterpret_cast<ni::InferenceServer*>(server);
-
-#ifdef TRTIS_ENABLE_STATS
-  ni::ServerStatTimerScoped timer(
-      lserver->StatusManager(), ni::ServerStatTimerScoped::Kind::MODEL_CONTROL);
-#endif  // TRTIS_ENABLE_STATS
 
   RETURN_IF_STATUS_ERROR(lserver->UnloadModel(std::string(model_name)));
 
