@@ -997,6 +997,7 @@ class InferenceServerClient:
                                                timeout=timeout)
 
         request_body = json.dumps(infer_request)
+        print(request_body)
         json_size = len(request_body)
         binary_data = None
         for input_tensor in inputs:
